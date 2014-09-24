@@ -1,18 +1,5 @@
 #!/usr/bin/lua
-dc_host, dc_port = "ozerki.org", 411
-nick, pass = "lunadc", ""
-slots, share = 10, 0
-ignore = {	["VerliHub"] = false,
-			["MOTD"] = false,
-			["Information"] = false
-}
--- http_logger - адреса http-логгеров в виде таблицы {["url1"] = "token1", …} или false
-http_logger = {["http://lunadclogger.dev/api/post"] = "token"}
-
-timeout = 300 -- количество подряд идущих пустых данных/таймаутов, после которого отключаемся (проблема сети/хаба/скрипта)
-
 version = "2.0"
-desc = "lunadc - standalone Direct Connect chat logger written in Lua"
 
 function show(text, ...) -- ... = таблица arg
 	print(("[%s] %s"):format(os.date("%H:%M:%S"), text:format(unpack(arg))))
@@ -38,7 +25,8 @@ function receive()
 		local count = 0 -- счётчик подряд идущих пустых данных/таймаутов
 		local buffer = ""
 		while count < timeout do
-			local fulldata, status, partdata = tcp:receive("*a") -- status = closed или timeout при соответствующих ошибках
+			local fulldata, status, partdata = tcp:receive("*a")
+			-- status = closed или timeout при соответствующих ошибках
 			local data = fulldata or partdata
 			if status == "closed" then die("Socket closed") end
 			if data ~= "" then
@@ -61,13 +49,15 @@ function receive()
 end
 
 function showmessage(user, message, me) -- me = 0 или 1
-	message = message:gsub("&#36;", "$")
-	message = message:gsub("&#124;", "|")
-	show(me == 1 and "* %s %s" or "<%s> %s", user, message)
-	if http_logger then
-		for logger_url, token in pairs(http_logger) do
-			local post = ("time=%s&user=%s&message=%s&me=%s&token=%s"):format(os.time(), urlencode(user), urlencode(message), me, token)
-			http.request(logger_url, post)
+	if not cfg.ignore or not cfg.ignore[user] then
+		message = message:gsub("&#36;", "$")
+		message = message:gsub("&#124;", "|")
+		show(me == 1 and "* %s %s" or "<%s> %s", user, message)
+		if cfg.logger then
+			for logger_url, token in pairs(cfg.logger) do
+				local post = ("time=%s&user=%s&message=%s&me=%s&token=%s"):format(os.time(), urlencode(user), urlencode(message), me, token)
+				http.request(logger_url, post)
+			end
 		end
 	end
 end
@@ -114,17 +104,18 @@ function lock2key(lock)
 	end
 	return table.concat(key)
 end
-
 -------------------------------------------------------
-
+cfg = require("config")
 socket = require("socket")
 tcp = socket.tcp()
 tcp:settimeout(1)
+timeout = cfg.timeout or 180
 commands = {} -- таблица, в которой будут храниться команды (сообщения) от хаба
 
 show("lunadc v%s", version)
 
-success, errormessage = tcp:connect(dc_host, dc_port) -- success = nil при ошибке, 1 при успешном выполнении
+success, errormessage = tcp:connect(cfg.host, cfg.port)
+-- success = nil при ошибке, 1 при успешном выполнении
 if not success then die("Socket error: %s", errormessage) end
 
 data = receive() -- $Lock
@@ -133,7 +124,7 @@ if not lock then die("$Lock is not received") end
 
 key = lock2key(lock)
 supports = lock:find("EXTENDEDPROTOCOL") and "$Supports HubTopic|" or ""
-tcp:send(("%s$Key %s|$ValidateNick %s|"):format(supports, key, nick))
+tcp:send(("%s$Key %s|$ValidateNick %s|"):format(supports, key, cfg.nick))
 
 hello_received = false
 tries = 10 -- делаем несколько попыток получить $Hello
@@ -146,11 +137,15 @@ while tries do
 		show(data) -- сообщения ботов, хаба, etc.
 	elseif data:find("$Hello") then
 		hello_received = true
-		show("Hello, %s", nick)
+		show("Hello, %s", cfg.nick)
 		break
 	elseif data == "$GetPass" then
-		tcp:send(("$MyPass %s|"):format(pass))
-		show("Password has been sent") 
+		if cfg.pass and cfg.pass ~= "" then
+			tcp:send(("$MyPass %s|"):format(cfg.pass))
+			show("Password has been sent")
+		else
+			die("Password is required")
+		end
 	elseif data == "$BadPass" then
 		die("Wrong password")
 	elseif data:find("$Supports") then
@@ -161,28 +156,32 @@ while tries do
 end
 if not hello_received then die("$Hello is not received") end
 
-tag = ("<lunadc V:%s,M:P,H:0/1/0,S:%s>"):format(version, slots)
-tcp:send(("$Version 1,0091|$MyINFO $ALL %s %s%s$ $100 $lunadc@ya.ru$%s$|"):format(nick, desc, tag, share))
+slots = cfg.slots or 10
+share = cfg.share or 0
+desc = cfg.desc or "lunadc - standalone Direct Connect chat logger written in Lua"
+email = cfg.email or "lunadc@ya.ru"
 
-if http_logger then http = require("socket.http") end
+tag = ("<lunadc V:%s,M:P,H:0/1/0,S:%s>"):format(version, slots)
+tcp:send(("$Version 1,0091|$MyINFO $ALL %s %s%s$ $100 $%s$%s$|"):format(cfg.nick, desc, tag, email, share))
+
+if cfg.logger then http = require("socket.http") end
 
 while true do
 	data = receive()
-	user, message = data:match("^<([^%c]-)> /me (.*)")
-	-- вариант /me - <ник> /me действие (то есть если хаб их никак не обрабатывает и шлёт как есть)
-	if user and message and not ignore[user] then
-		showmessage(user, message, 1)
+	user, message = data:match("^<([^%c]-)> (.*)")
+	if user then
+		if message:sub(1, 3) == "/me" then
+			message = message:sub(5)
+			me = 1
+		else
+			me = 0
+		end
+		showmessage(user, message, me)
 	else
 		user, message = data:match("^%*+ ?([^%*%c ]+) (.*)")
 		-- варианты /me - * ник действие; ** ник действие; *ник действие и т.д.
-		if user and message and not ignore[user] then
+		if user then
 			showmessage(user, message, 1)
-		else
-			user, message = data:match("^<(.-)> (.*)")
-			-- обычное сообщение
-			if user and message and not ignore[user] then
-				showmessage(user, message, 0)
-			end
 		end
 	end
 end
