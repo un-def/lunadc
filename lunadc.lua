@@ -5,8 +5,10 @@ function show(text, ...) -- ... = таблица arg
 	print(("[%s] %s"):format(os.date("%H:%M:%S"), text:format(unpack(arg))))
 end
 
+show_info_msg = show -- sort of alias (см. проверку cfg.hide_info_msg)
+
 function die(dietext, ...)
-	show(dietext, unpack(arg))
+	show_info_msg(dietext, unpack(arg))
 	tcp:close()
 	os.exit(1)
 end
@@ -48,11 +50,13 @@ function receive()
 	return table.remove(commands, 1)
 end
 
-function showmessage(user, message, me) -- me = 0 или 1
+function show_chat_msg(user, message, me) -- me = 0 или 1
 	if not cfg.ignore or not cfg.ignore[user] then
 		message = message:gsub("&#36;", "$")
 		message = message:gsub("&#124;", "|")
-		show(me == 1 and "* %s %s" or "<%s> %s", user, message)
+		if not cfg.hide_chat_msg then
+			show(me == 1 and "* %s %s" or "<%s> %s", user, message)
+		end
 		if cfg.logger then
 			for logger_url, token in pairs(cfg.logger) do
 				local post = ("time=%s&user=%s&message=%s&me=%s&token=%s"):format(os.time(), urlencode(user), urlencode(message), me, token)
@@ -111,8 +115,12 @@ tcp = socket.tcp()
 tcp:settimeout(1)
 timeout = cfg.timeout or 180
 commands = {} -- таблица, в которой будут храниться команды (сообщения) от хаба
+if cfg.hide_info_msg then
+	show_info_msg = function () end
+	-- подменяем вывод служебных сообщений пустой функцией
+end
 
-show("lunadc v%s", version)
+show_info_msg("lunadc v%s", version)
 
 success, errormessage = tcp:connect(cfg.host, cfg.port)
 -- success = nil при ошибке, 1 при успешном выполнении
@@ -132,19 +140,19 @@ while tries do
 	data = receive()
 	hubname = data:match("$HubName (.+)")
 	if hubname then
-		show("Hub: %s", hubname)
+		show_info_msg("Hub: %s", hubname)
 	elseif data:sub(1,1) ~= "$" then
-		show(data) -- сообщения ботов, хаба, etc.
+		show_info_msg(data) -- сообщения ботов, хаба, etc.
 	elseif data:find("$Hello") then
 		hello_received = true
-		show("Hello, %s", cfg.nick)
+		show_info_msg("Hello, %s", cfg.nick)
 		break
 	elseif data == "$GetPass" then
 		if cfg.pass and cfg.pass ~= "" then
 			tcp:send(("$MyPass %s|"):format(cfg.pass))
-			show("Password has been sent")
+			show_info_msg("Password has been sent")
 		else
-			die("Password is required")
+			die("Password has been requested but not specified")
 		end
 	elseif data == "$BadPass" then
 		die("Wrong password")
@@ -158,7 +166,7 @@ if not hello_received then die("$Hello is not received") end
 
 slots = cfg.slots or 10
 share = cfg.share or 0
-desc = cfg.desc or "lunadc - standalone Direct Connect chat logger written in Lua"
+desc = cfg.desc or "lunadc - standalone Direct Connect bot for chat logging"
 email = cfg.email or "lunadc@ya.ru"
 
 tag = ("<lunadc V:%s,M:P,H:0/1/0,S:%s>"):format(version, slots)
@@ -176,12 +184,12 @@ while true do
 		else
 			me = 0
 		end
-		showmessage(user, message, me)
+		show_chat_msg(user, message, me)
 	else
 		user, message = data:match("^%*+ ?([^%*%c ]+) (.*)")
 		-- варианты /me - * ник действие; ** ник действие; *ник действие и т.д.
 		if user then
-			showmessage(user, message, 1)
+			show_chat_msg(user, message, 1)
 		end
 	end
 end
