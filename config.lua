@@ -20,5 +20,6 @@ cfg.ignore = {
 cfg.logger = {["http://lunadclogger.dev/api/post"] = "token"}
 cfg.hide_info_msg = false
 cfg.hide_chat_msg = false
+cfg.timestamp = "(%H:%M:%S)"
 
 return cfg

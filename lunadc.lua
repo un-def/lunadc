@@ -2,7 +2,7 @@
 version = "2.0"
 
 function show(text, ...) -- ... = таблица arg
-	print(("[%s] %s"):format(os.date("%H:%M:%S"), text:format(unpack(arg))))
+	print(("%s %s"):format(os.date(timestamp), text:format(unpack(arg))))
 end
 
 show_info_msg = show -- sort of alias (см. проверку cfg.hide_info_msg)
@@ -119,6 +119,7 @@ if cfg.hide_info_msg then
 	show_info_msg = function () end
 	-- подменяем вывод служебных сообщений пустой функцией
 end
+timestamp = cfg.timestamp or "[%d-%m-%Y %H:%M:%S]"
 
 show_info_msg("lunadc v%s", version)
 
