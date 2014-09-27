@@ -120,6 +120,11 @@ if cfg.hide_info_msg then
 	-- подменяем вывод служебных сообщений пустой функцией
 end
 timestamp = cfg.timestamp or "[%d-%m-%Y %H:%M:%S]"
+if cfg.control_nick and cfg.control_nick ~= "" then
+	die_command = ("$To: %s From: %s $<%s> !die"):format(cfg.nick, cfg.control_nick, cfg.control_nick)
+else
+	die_command = nil
+end
 
 show_info_msg("lunadc v%s", version)
 
@@ -177,6 +182,9 @@ if cfg.logger then http = require("socket.http") end
 
 while true do
 	data = receive()
+	if data == die_command then
+		die("Command !die has been received from %s", cfg.control_nick)
+	end
 	user, message = data:match("^<([^%c]-)> (.*)")
 	if user then
 		if message:sub(1, 3) == "/me" then
