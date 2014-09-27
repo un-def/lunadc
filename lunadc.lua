@@ -1,14 +1,14 @@
 #!/usr/bin/lua
 version = "2.0"
 
-function show(text, ...) -- ... = таблица arg
-	print(("%s %s"):format(os.date(timestamp), text:format(unpack(arg))))
+function show(text, ...)
+	print(("%s %s"):format(os.date(timestamp), text:format(...)))
 end
 
 show_info_msg = show -- sort of alias (см. проверку cfg.hide_info_msg)
 
 function die(dietext, ...)
-	show_info_msg(dietext, unpack(arg))
+	show_info_msg(dietext, ...)
 	tcp:close()
 	os.exit(1)
 end
