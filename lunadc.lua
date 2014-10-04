@@ -42,7 +42,7 @@ function receive()
 			end
 		end
 		if fail then
-			die("Timeout")
+			die("Timeout (%s s)", timeout)
 		else
 			buffer:gsub("([^|]+)|", function (c) table.insert(commands, c) end) -- split
 		end
@@ -59,7 +59,7 @@ function show_chat_msg(user, message, me) -- me = 0 или 1
 		end
 		if cfg.logger then
 			for logger_url, token in pairs(cfg.logger) do
-				local post = ("time=%s&user=%s&message=%s&me=%s&token=%s"):format(os.time(), urlencode(user), urlencode(message), me, token)
+				local post = ("time=%s&user=%s&message=%s&me=%s&token=%s"):format(os.time(), urlencode(user), urlencode(message), me, urlencode(token))
 				http.request(logger_url, post)
 			end
 		end
