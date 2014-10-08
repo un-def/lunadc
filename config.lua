@@ -1,7 +1,7 @@
 local cfg = {}
 
 -- обязательные настройки
-cfg.host = "dc.zet"
+cfg.host = "allavtovo.ru"
 cfg.port = 411
 cfg.nick = "lunadc"
 
