@@ -13,10 +13,6 @@ function die(dietext, ...)
 	os.exit(1)
 end
 
-function urlencode(str)
-	return str:gsub("([^%w%-%_%.%~])", function (c) return ("%%%02X"):format(c:byte()) end)
-end
-
 function receive()
 	-- возвращает команды (сообщения) хаба по одной (без конечного '|')
 	-- хранит их в таблице commands, когда она пустеет - читает из сокета
@@ -59,7 +55,7 @@ function show_chat_msg(user, message, me) -- me = 0 или 1
 		end
 		if cfg.logger then
 			for logger_url, token in pairs(cfg.logger) do
-				local post = ("time=%s&user=%s&message=%s&me=%s&token=%s"):format(os.time(), urlencode(user), urlencode(message), me, urlencode(token))
+				local post = ("time=%s&user=%s&message=%s&me=%s&token=%s"):format(os.time(), url.escape(user), url.escape(message), me, url.escape(token))
 				http.request(logger_url, post)
 			end
 		end
@@ -178,7 +174,10 @@ email = cfg.email or "lunadc@ya.ru"
 tag = ("<lunadc V:%s,M:P,H:0/1/0,S:%s>"):format(version, slots)
 tcp:send(("$Version 1,0091|$MyINFO $ALL %s %s%s$ $100 $%s$%s$|"):format(cfg.nick, desc, tag, email, share))
 
-if cfg.logger then http = require("socket.http") end
+if cfg.logger then
+	http = require("socket.http")
+	url = require("socket.url")
+end
 
 while true do
 	data = receive()
