@@ -1,19 +1,52 @@
 #!/usr/bin/lua
-version = "2.0"
+local version = "2.0"
+local cfg = require("config")
+local socket = require("socket")
+local dc = socket.tcp()
+dc:settimeout(1)
+local commands = {} -- таблица, в которой будут храниться команды (сообщения) от хаба
+local timeout = cfg.timeout or 180
+local timestamp = cfg.timestamp or "[%d-%m-%Y %H:%M:%S]"
+local die_command
+if cfg.control_nick and cfg.control_nick ~= "" then
+	die_command = ("$To: %s From: %s $<%s> !die"):format(cfg.nick, cfg.control_nick, cfg.control_nick)
+end
+local http, url
+if cfg.logger then
+	http = require("socket.http")
+	url = require("socket.url")
+end
 
-function show(text, ...)
+local function show(text, ...)
 	print(("%s %s"):format(os.date(timestamp), text:format(...)))
 end
 
-show_info_msg = show -- sort of alias (см. проверку cfg.hide_info_msg)
+local show_info_msg = cfg.hide_info_msg and function () end or show
+-- подменяем вывод служебных сообщений пустой функцией
 
-function die(dietext, ...)
+local function show_chat_msg(user, message, me) -- me = 0 или 1
+	if not cfg.ignore or not cfg.ignore[user] then
+		message = message:gsub("&#36;", "$")
+		message = message:gsub("&#124;", "|")
+		if not cfg.hide_chat_msg then
+			show(me == 1 and "* %s %s" or "<%s> %s", user, message)
+		end
+		if cfg.logger then
+			for logger_url, token in pairs(cfg.logger) do
+				local post = ("time=%s&user=%s&message=%s&me=%s&token=%s"):format(os.time(), url.escape(user), url.escape(message), me, url.escape(token))
+				http.request(logger_url, post)
+			end
+		end
+	end
+end
+
+local function die(dietext, ...)
 	show_info_msg(dietext, ...)
-	tcp:close()
+	dc:close()
 	os.exit(1)
 end
 
-function receive()
+local function receive()
 	-- возвращает команды (сообщения) хаба по одной (без конечного '|')
 	-- хранит их в таблице commands, когда она пустеет - читает из сокета
 	-- данные в свой буфер кусками, пока не встретит в конце куска '|',
@@ -23,7 +56,7 @@ function receive()
 		local count = 0 -- счётчик подряд идущих пустых данных/таймаутов
 		local buffer = ""
 		while count < timeout do
-			local fulldata, status, partdata = tcp:receive("*a")
+			local fulldata, status, partdata = dc:receive("*a")
 			-- status = closed или timeout при соответствующих ошибках
 			local data = fulldata or partdata
 			if status == "closed" then die("Socket closed") end
@@ -46,23 +79,7 @@ function receive()
 	return table.remove(commands, 1)
 end
 
-function show_chat_msg(user, message, me) -- me = 0 или 1
-	if not cfg.ignore or not cfg.ignore[user] then
-		message = message:gsub("&#36;", "$")
-		message = message:gsub("&#124;", "|")
-		if not cfg.hide_chat_msg then
-			show(me == 1 and "* %s %s" or "<%s> %s", user, message)
-		end
-		if cfg.logger then
-			for logger_url, token in pairs(cfg.logger) do
-				local post = ("time=%s&user=%s&message=%s&me=%s&token=%s"):format(os.time(), url.escape(user), url.escape(message), me, url.escape(token))
-				http.request(logger_url, post)
-			end
-		end
-	end
-end
-
-function lock2key(lock)
+local function lock2key(lock)
 	local function bitwise(x, y, bw)
 		local c, p = 0, 1
 		local function bODD(x)
@@ -104,43 +121,24 @@ function lock2key(lock)
 	end
 	return table.concat(key)
 end
--------------------------------------------------------
-cfg = require("config")
-socket = require("socket")
-tcp = socket.tcp()
-tcp:settimeout(1)
-timeout = cfg.timeout or 180
-commands = {} -- таблица, в которой будут храниться команды (сообщения) от хаба
-if cfg.hide_info_msg then
-	show_info_msg = function () end
-	-- подменяем вывод служебных сообщений пустой функцией
-end
-timestamp = cfg.timestamp or "[%d-%m-%Y %H:%M:%S]"
-if cfg.control_nick and cfg.control_nick ~= "" then
-	die_command = ("$To: %s From: %s $<%s> !die"):format(cfg.nick, cfg.control_nick, cfg.control_nick)
-else
-	die_command = nil
-end
 
 show_info_msg("lunadc v%s", version)
-
-success, errormessage = tcp:connect(cfg.host, cfg.port)
+local success, errormessage = dc:connect(cfg.host, cfg.port)
 -- success = nil при ошибке, 1 при успешном выполнении
 if not success then die("Socket error: %s", errormessage) end
 
-data = receive() -- $Lock
-lock = data:match("^$Lock (.+) Pk=.+")
+local data = receive() -- $Lock
+local lock = data:match("^$Lock (.+) Pk=.+")
 if not lock then die("$Lock is not received") end
+local key = lock2key(lock)
+local supports = lock:find("EXTENDEDPROTOCOL") and "$Supports HubTopic|" or ""
+dc:send(("%s$Key %s|$ValidateNick %s|"):format(supports, key, cfg.nick))
 
-key = lock2key(lock)
-supports = lock:find("EXTENDEDPROTOCOL") and "$Supports HubTopic|" or ""
-tcp:send(("%s$Key %s|$ValidateNick %s|"):format(supports, key, cfg.nick))
-
-hello_received = false
-tries = 10 -- делаем несколько попыток получить $Hello
+local hello_received = false
+local tries = 10 -- делаем несколько попыток получить $Hello
 while tries do
-	data = receive()
-	hubname = data:match("$HubName (.+)")
+	local data = receive()
+	local hubname = data:match("$HubName (.+)")
 	if hubname then
 		show_info_msg("Hub: %s", hubname)
 	elseif data:sub(1,1) ~= "$" then
@@ -151,7 +149,7 @@ while tries do
 		break
 	elseif data == "$GetPass" then
 		if cfg.pass and cfg.pass ~= "" then
-			tcp:send(("$MyPass %s|"):format(cfg.pass))
+			dc:send(("$MyPass %s|"):format(cfg.pass))
 			show_info_msg("Password has been sent")
 		else
 			die("Password has been requested but not specified")
@@ -166,35 +164,28 @@ while tries do
 end
 if not hello_received then die("$Hello is not received") end
 
-slots = cfg.slots or 10
-share = cfg.share or 0
-desc = cfg.desc or "lunadc - standalone Direct Connect bot for chat logging"
-email = cfg.email or "lunadc@ya.ru"
-
-tag = ("<lunadc V:%s,M:P,H:0/1/0,S:%s>"):format(version, slots)
-tcp:send(("$Version 1,0091|$MyINFO $ALL %s %s%s$ $100 $%s$%s$|"):format(cfg.nick, desc, tag, email, share))
-
-if cfg.logger then
-	http = require("socket.http")
-	url = require("socket.url")
-end
+local slots = cfg.slots or 10
+local share = cfg.share or 0
+local desc = cfg.desc or "lunadc - standalone Direct Connect bot for chat logging"
+local email = cfg.email or "lunadc@ya.ru"
+local tag = ("<lunadc V:%s,M:P,H:0/1/0,S:%s>"):format(version, slots)
+dc:send(("$Version 1,0091|$MyINFO $ALL %s %s%s$ $100 $%s$%s$|"):format(cfg.nick, desc, tag, email, share))
 
 while true do
-	data = receive()
+	local data = receive()
 	if data == die_command then
 		die("Command !die has been received from %s", cfg.control_nick)
 	end
-	user, message = data:match("^<([^%c]-)> (.*)")
+	local user, message = data:match("^<([^%c]-)> (.*)")
+	local me = 0
 	if user then
 		if message:sub(1, 3) == "/me" then
 			message = message:sub(5)
 			me = 1
-		else
-			me = 0
 		end
 		show_chat_msg(user, message, me)
 	else
-		user, message = data:match("^%*+ ?([^%*%c ]+) (.*)")
+		local user, message = data:match("^%*+ ?([^%*%c ]+) (.*)")
 		-- варианты /me - * ник действие; ** ник действие; *ник действие и т.д.
 		if user then
 			show_chat_msg(user, message, 1)
