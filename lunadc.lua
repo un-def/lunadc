@@ -83,23 +83,14 @@ end
 local function lock2key(lock)
 	local function bitwise(x, y, bw)
 		local c, p = 0, 1
-		local function bODD(x)
-			return x ~= math.floor(x / 2) * 2
-		end
+		local function odd(x) return x % 2 ~= 0 end
+		local op = {
+			["xor"] = function(x, y) return (odd(x) and not odd(y)) or (odd(y) and not odd(x)) end,
+			["and"] = function(x, y) return odd(x) and odd(y) end,
+			["or"] = function(x, y) return odd(x) or odd(y) end
+		}
 		while x > 0 or y > 0 do
-			if bw == "xor" then
-				if (bODD(x) and not bODD(y)) or (bODD(y) and not bODD(x)) then
-					c = c + p
-				end
-			elseif bw == "and" then
-				if bODD(x) and bODD(y) then
-					c = c + p
-				end
-			elseif bw == "or" then
-				if bODD(x) or bODD(y) then
-					c = c + p
-				end
-			end
+			if op[bw](x, y) then c = c + p end
 			x = math.floor(x / 2)
 			y = math.floor(y / 2)
 			p = p * 2
@@ -107,18 +98,17 @@ local function lock2key(lock)
 		return c
 	end
 	local key = {}
-	table.insert(key, bitwise(bitwise(bitwise(string.byte(lock, 1), string.byte(lock, -1), "xor"), string.byte(lock, -2), "xor"), 5, "xor"))
-	for i = 2, string.len(lock), 1 do
-		table.insert(key, bitwise(string.byte(lock, i), string.byte(lock, i - 1), "xor"))
+	table.insert(key, bitwise(bitwise(bitwise(lock:byte(1), lock:byte(-1), "xor"), lock:byte(-2), "xor"), 5, "xor"))
+	for i = 2, #lock do
+		table.insert(key, bitwise(lock:byte(i-1), lock:byte(i), "xor"))
 	end
 	local function nibbleswap(bits)
-		return bitwise(bitwise(bits * (2 ^ 4), 240, "and"), bitwise(math.floor(bits / (2 ^ 4)), 15, "and"), "or")
+		return bitwise(bitwise(bits*16, 240, "and"), bitwise(math.floor(bits/16), 15, "and"), "or")
 	end
-	local g = {["5"] = 1, ["0"] = 1, ["36"] = 1, ["96"] = 1, ["124"] = 1, ["126"] = 1}
+	local escape = {[0] = true, [5] = true, [36] = true, [96] = true, [124] = true, [126] = true}
 	for i = 1, #key do
-		local b = nibbleswap(rawget(key, i))
-		rawset(key, i, (g[tostring(b)] and
-		string.format("/%%DCN%03d%%/", b) or string.char(b)))
+		local b = nibbleswap(key[i])
+		key[i] = escape[b] and string.format("/%%DCN%03d%%/", b) or string.char(b)
 	end
 	return table.concat(key)
 end
