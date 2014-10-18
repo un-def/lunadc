@@ -32,8 +32,9 @@ local function show_chat_msg(user, message, me) -- me = 0 или 1
 			show(me == 1 and "* %s %s" or "<%s> %s", user, message)
 		end
 		if cfg.logger then
+			local time = os.time()
 			for logger_url, token in pairs(cfg.logger) do
-				local post = ("time=%s&user=%s&message=%s&me=%s&token=%s"):format(os.time(), url.escape(user), url.escape(message), me, url.escape(token))
+				local post = ("time=%s&user=%s&message=%s&me=%s&token=%s"):format(time, url.escape(user), url.escape(message), me, url.escape(token))
 				http.request(logger_url, post)
 			end
 		end
