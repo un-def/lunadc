@@ -1,5 +1,5 @@
 #!/usr/bin/lua
-local version = "2.0"
+local version = "2.1"
 local cfg = require("config")
 local socket = require("socket")
 local dc = socket.tcp()
